@@ -1,0 +1,102 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"strconv"
+
+	"github.com/gorilla/mux"
+	"github.com/jinzhu/gorm"
+
+	_ "github.com/jinzhu/gorm/dialects/mysql"
+	_ "github.com/jinzhu/gorm/dialects/postgres"
+)
+
+type Order struct {
+	gorm.Model
+	OrderID      int
+	CustomerName string
+	Items        string
+	Quantity     int
+}
+
+var db *gorm.DB
+var db1 *gorm.DB
+
+func initDB() {
+	var err error
+	db, err = gorm.Open("postgres", "host=localhost port=5432 user=postgres dbname=postgres sslmode=disable password=reddy1234@")
+	db1, err = gorm.Open("mysql", "root:reddy1234@@tcp(localhost:3306)/mysql?parseTime=True")
+	if err != nil {
+		fmt.Println(err)
+		panic("failed to connect database")
+	}
+	db1.AutoMigrate(&Order{})
+	db.AutoMigrate(&Order{})
+}
+
+func main() {
+	router := mux.NewRouter()
+	router.HandleFunc("/postorders", createOrder).Methods("POST")
+	router.HandleFunc("/getorders/{orderId}", getOrder).Methods("GET")
+	router.HandleFunc("/getallorders", getOrders).Methods("GET")
+	router.HandleFunc("/updateorders/{orderId}", updateOrder).Methods("PUT")
+	router.HandleFunc("/deleteorders/{orderId}", deleteOrder).Methods("DELETE")
+	initDB()
+
+	log.Fatal(http.ListenAndServe(":8080", router))
+}
+
+func createOrder(w http.ResponseWriter, r *http.Request) {
+	var order Order
+	json.NewDecoder(r.Body).Decode(&order)
+	db.Create(&order)
+	db1.Create(&order)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(order)
+}
+
+func getOrders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var orders []Order
+	db.Preload("Items").Find(&orders)
+	db1.Preload("Items").Find(&orders)
+	json.NewEncoder(w).Encode(orders)
+}
+
+func getOrder(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	params := mux.Vars(r)
+	inputOrderID := params["orderId"]
+
+	var order Order
+	db.Preload("Items").First(&order, inputOrderID)
+	db1.Preload("Items").First(&order, inputOrderID)
+
+	json.NewEncoder(w).Encode(order)
+}
+
+func updateOrder(w http.ResponseWriter, r *http.Request) {
+	var updatedOrder Order
+	json.NewDecoder(r.Body).Decode(&updatedOrder)
+	db.Save(&updatedOrder)
+	db1.Save(&updatedOrder)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updatedOrder)
+}
+
+func deleteOrder(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	inputOrderID := params["orderId"]
+	id64, _ := strconv.ParseUint(inputOrderID, 10, 64)
+	idToDelete := uint(id64)
+
+	db.Where("order_id = ?", idToDelete).Delete(&Order{})
+	db1.Where("order_id = ?", idToDelete).Delete(&Order{})
+
+	w.WriteHeader(http.StatusNoContent)
+}
